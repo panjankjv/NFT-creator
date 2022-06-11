@@ -1,13 +1,16 @@
 <template>
   <v-form
+    ref="form"
     v-model="valid"
+    @submit.prevent="submitHandler"
   >
-    <div class="mb-6">
+    <div>
       <v-sheet
         outlined
         rounded
-        class="px-12 py-10  d-flex justify-center align-center"
+        class="px-12 py-10 mb-1 d-flex justify-center align-center"
         style=" position:relative;"
+        :style="{borderColor: !fileError?'':'#ff5252'}"
         min-height="200"
       >
         <v-btn
@@ -45,13 +48,15 @@
         >
       </v-sheet>
 
-      <div class="text-caption error--text pl-3">
-        <div
-          v-for="i in fileErrors"
-          :key="i"
-        >
-          {{ i }}
-        </div>
+      <div
+        class="text-caption error--text pl-3 mb-2"
+        style="min-height:14px; line-height:12px; overflow:hidden;"
+      >
+        <v-scroll-y-transition>
+          <div v-if="fileError">
+            {{ fileError }}
+          </div>
+        </v-scroll-y-transition>
       </div>
     </div>
 
@@ -63,77 +68,107 @@
       prepend-icon=""
       prepend-inner-icon=""
       required
-      @input="$v.file.$touch()"
-      @blur="$v.file.$touch()"
-    >
-      <template #default>
-        ici
-      </template>
-    </v-file-input>
+      :rules="fileRules"
+    />
 
     <v-text-field
       v-model="name"
       outlined
       dense
-      required
       label="Name"
-      :error-messages="nameErrors"
-      @input="$v.name.$touch()"
-      @blur="$v.name.$touch()"
+      name="name"
+      required
+      :rules="nameRules"
+      autocomplete="off"
     />
+
+    <v-text-field
+      v-model="description"
+      outlined
+      dense
+      name="description"
+      required
+      :rules="descriptionRules"
+      autocomplete="off"
+    >
+      <template v-slot:label>
+        <div>
+          Description <small>(optional)</small>
+        </div>
+      </template>
+    </v-text-field>
 
     <v-text-field
       v-model="supply"
       outlined
       dense
       required
-      label="Fixed supply"
+      label="Supply"
       type="number"
       min="1"
       max="1e12"
-      :error-messages="supplyErrors"
-      @input="$v.supply.$touch()"
-      @blur="$v.supply.$touch()"
+      :rules="supplyRules"
+      autocomplete="off"
     />
 
     <div class="d-flex">
+      <n-f-t-creator-costs />
       <v-spacer />
       <v-btn
         color="primary"
-        :disabled="!valid || !connected"
-        @click="create"
+        type="submit"
+        :disabled="!valid || !connected || loading"
+        :loading="loading"
       >
         Create
       </v-btn>
     </div>
 
-    <v-alert
-      v-if="alert"
-      class="my-4"
-      :type="alert.type"
-    >
-      {{ alert.msg }}
-    </v-alert>
+    <div>
+      <v-slide-x-transition group>
+        <v-alert
+          v-for="alert in alerts"
+          :key="alert.id"
+          class="my-4 text-body-2"
+          :type="alert.type"
+          dense
+          dismissible
+        >
+          {{ alert.msg }}
+          <a
+            v-if="alert.link"
+            :href="alert.link"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="white--text text-decoration-none"
+          > {{ alert.link | address(20) }}</a>
+        </v-alert>
+      </v-slide-x-transition>
+    </div>
   </v-form>
 </template>
 
 <script>
-import { validationMixin } from 'vuelidate';
-import {
-  required, maxLength, minLength, between, integer,
-} from 'vuelidate/lib/validators';
 import { createCollectible } from '@/api/collectibles.api';
 import { createUpload } from '@/api/uploads.api';
 import createTokenCollectible from '../utils/createTokenCollectible';
+import NFTCreatorCosts from './NFTCreatorCosts.vue';
 
 export default {
-  mixins: [validationMixin],
+  name: 'NFTCreatorForm',
+  components: { NFTCreatorCosts },
   data: () => ({
-    valid: false,
+    valid: true,
     name: '',
-    supply: null,
+    description: '',
+    supply: '',
     file: null,
-    alert: null,
+    alerts: [],
+    nameRules: [],
+    descriptionRules: [],
+    supplyRules: [],
+    fileRules: [],
+    loading: false,
   }),
   computed: {
     connected: {
@@ -146,48 +181,13 @@ export default {
         return this.$store.state.wallet.connected;
       },
     },
-    nameErrors() {
-      const errors = [];
-      if (!this.$v.name.$dirty) return errors;
-      if (!this.$v.name.maxLength) {
-        errors.push('Name must be at most 50 characters long');
+    fileError() {
+      for (let i = 0; i < this.fileRules.length; i += 1) {
+        const rule = this.fileRules[i];
+        const r = rule(this.file);
+        if (r !== true) return r;
       }
-      if (!this.$v.name.minLength) {
-        errors.push('Name must be at least 3 characters long');
-      }
-      if (!this.$v.name.required) {
-        errors.push('Name is required.');
-      }
-      return errors;
-    },
-    supplyErrors() {
-      const errors = [];
-      if (!this.$v.supply.$dirty) return errors;
-      if (!this.$v.supply.between) {
-        errors.push('Supply must be between 1 and 1,000,000,000,000');
-      }
-      if (!this.$v.supply.integer) {
-        errors.push('Supply must be an integer');
-      }
-      if (!this.$v.supply.required) {
-        errors.push('Supply is required.');
-      }
-      return errors;
-    },
-    fileErrors() {
-      const errors = [];
-      if (!this.$v.file.$dirty) return errors;
-      console.log('~ this.file', this.file);
-      if (!this.$v.file.required) {
-        errors.push('File is required.');
-      }
-      if (!this.$v.fileSize.integer) {
-        errors.push('File size must be an integer');
-      }
-      if (!this.$v.fileSize.between) {
-        errors.push('File size must be at most 2 Mo.');
-      }
-      return errors;
+      return null;
     },
     fileSize() {
       if (!this.file || !this.file.size) return null;
@@ -199,11 +199,48 @@ export default {
     },
   },
   methods: {
+    submitHandler() {
+      this.nameRules = [
+        (v) => !!v || 'Name is required',
+        (v) => (v && v.length <= 50) || 'Name must be less than 50 characters',
+        (v) => (v && v.length >= 3) || 'Name must be at least 3 characters',
+        (v) => (v === '')
+            || (new RegExp("^[A-Za-z0-9'?!.,:áéíóúÁÉÍÓÚñÑäëïÖüÄËÏÖü_ -]+$", 'u').test(v))
+            || 'Use standard characters',
+      ];
+      this.descriptionRules = [
+        (v) => (v.length <= 300) || 'Description must be less than 300 characters',
+        (v) => (v === '')
+            || (new RegExp("^[A-Za-z0-9'?!.,:áéíóúÁÉÍÓÚñÑäëïÖüÄËÏÖü_ -]+$", 'u').test(v))
+            || 'Use standard characters',
+      ];
+      this.supplyRules = [
+        (v) => !!v || 'Supply is required',
+        (v) => (v && v.length <= 1e12) || 'Supply must be less than 1,000,000,000,000',
+        (v) => (v && v.length >= 1) || 'Supply must be a least 1',
+        (v) => (v && Number.isInteger(parseFloat(v))) || 'Supply must be an integer',
+      ];
+      this.fileRules = [
+        (v) => !!v || 'File is required',
+        (v) => (v && v.size && v.size <= 2e6) || 'File must be less than 2mb',
+      ];
+      setTimeout(() => {
+        if (this.$refs.form.validate()) {
+          this.create();
+        }
+      }, 100);
+
+      // this.create();
+    },
     async create() {
-      await this.$v.$touch();
-      if (!this.valid) return;
+      this.loading = true;
       try {
-        const tokenCollectible = await createTokenCollectible(this.$connection, this.$wallet, 20);
+        const tokenCollectible = await createTokenCollectible(this.$connection, this.$wallet, this.supply);
+        this.alerts.push({
+          id: Date.now() + Math.random(),
+          type: 'info',
+          msg: `Token created: ${tokenCollectible.address.toString()}`,
+        });
         const formData = new FormData();
         formData.append('image', this.file);
         const uploadRes = await createUpload(formData);
@@ -215,28 +252,34 @@ export default {
           decimals: 0,
           image: `ipfs://${uploadResData.IpfsHash}`,
           name: this.name,
+          description: this.description || undefined,
         };
+        console.log('~ buildedCollectible', buildedCollectible);
+        this.alerts.push({
+          id: Date.now() + Math.random(),
+          type: 'info',
+          msg: 'Image uploaded',
+          link: `https://gateway.pinata.cloud/ipfs/${uploadResData.IpfsHash}`,
+        });
         await createCollectible(buildedCollectible);
+        this.alerts.push({
+          id: Date.now() + Math.random(),
+          type: 'info',
+          msg: 'Collectible created',
+          link: `https://sonar.watch/collectibles/${buildedCollectible.creator}`,
+        });
       } catch (e) {
-        this.alert = {
+        console.log('~ e', e);
+        this.alerts.push({
+          id: Date.now() + Math.random(),
           msg: e,
           type: 'error',
-        };
+        });
       }
+      this.loading = false;
     },
     openFileExplorer() {
       this.$refs.file.$refs.input.click();
-    },
-  },
-  validations: {
-    name: { required, maxLength: maxLength(50), minLength: minLength(3) },
-    supply: { required, integer, between: between(1, 1e12) },
-    file: { required },
-    fileSize: { required, integer, between: between(1, 2e6) },
-    checkbox: {
-      checked(val) {
-        return val;
-      },
     },
   },
 };
